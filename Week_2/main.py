@@ -29,6 +29,12 @@ class DualMACrossover(QCAlgorithm):
 
         self.set_benchmark(self.btc)               # 图表上叠加 BTC 基准线
 
+        self.plot_indicator(        # 增加图表，显示均线
+            "BTC Moving Averages",
+            self.fast,
+            self.slow
+        )
+
         # ---- 状态与统计 ----
         self.prev_above = None       # 昨日 fast 是否在 slow 上方
         self.entry_cost = 0.0        # 本次入场总花费（含手续费）
