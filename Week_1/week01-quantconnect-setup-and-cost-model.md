@@ -145,7 +145,7 @@ class CostModelCheck(QCAlgorithm):
         # 券商模型决定手续费和滑点，要和目标交易所对齐
         self.set_brokerage_model(BrokerageName.COINBASE, AccountType.CASH)
         self.btc = self.add_crypto("BTCUSD", Resolution.DAILY, Market.COINBASE).symbol
-        self.done = False
+        self.done = False   # q - 这里是干什么的？
 
     def on_data(self, data):
         if not self.done and self.btc in data.bars:

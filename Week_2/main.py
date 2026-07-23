@@ -23,8 +23,8 @@ class DualMACrossover(QCAlgorithm):
         self.securities[self.btc].set_slippage_model(ConstantSlippageModel(0.0005))
 
         # ---- 指标：引擎自动喂数据，不用手动 update ----
-        self.fast = self.sma(self.btc, 20, Resolution.DAILY)
-        self.slow = self.sma(self.btc, 60, Resolution.DAILY)
+        self.fast = self.sma(self.btc, 20, Resolution.DAILY)    # 快线指标
+        self.slow = self.sma(self.btc, 60, Resolution.DAILY)    # 慢线指标
         self.set_warm_up(60, Resolution.DAILY)     # 先喂 60 根让慢线就绪
 
         self.set_benchmark(self.btc)               # 图表上叠加 BTC 基准线
@@ -43,6 +43,7 @@ class DualMACrossover(QCAlgorithm):
         price = data.bars[self.btc].close
         self.last_price = price
 
+        # 这里的判断是什么意思？
         if self.is_warming_up or not self.slow.is_ready:
             return
 
@@ -56,6 +57,8 @@ class DualMACrossover(QCAlgorithm):
             self.prev_above = above
             return
 
+        # q - 这里的self.portfolio[self.btc].invested是什么意思
+        # 答：表示当前是否持有该标的的仓位，如果为 True，说明已经买入；为 False，说明未持仓
         if above and not self.prev_above and not self.portfolio[self.btc].invested:
             self.set_holdings(self.btc, 0.95)  # 金叉：留 5% 现金付手续费
         elif not above and self.prev_above and self.portfolio[self.btc].invested:
@@ -64,6 +67,8 @@ class DualMACrossover(QCAlgorithm):
         self.prev_above = above
 
     def on_order_event(self, oe):
+        # q - 这里的判断是什么意思？
+        # 答：只有当订单被完全成交时，才会更新成本和记录盈亏
         if oe.status != OrderStatus.FILLED:
             return
         fee = oe.order_fee.value.amount
