@@ -27,6 +27,12 @@ class DualMACrossover(QCAlgorithm):
         self.slow = self.sma(self.btc, 60, Resolution.DAILY)    # 慢线指标
         self.set_warm_up(60, Resolution.DAILY)     # 先喂 60 根让慢线就绪
 
+        self.plot_indicator(
+            "BTC Moving Averages",
+            self.fast,
+            self.slow
+        )
+
         self.set_benchmark(self.btc)               # 图表上叠加 BTC 基准线
 
         self.plot_indicator(        # 增加图表，显示均线
@@ -40,6 +46,7 @@ class DualMACrossover(QCAlgorithm):
         self.entry_cost = 0.0        # 本次入场总花费（含手续费）
         self.trades = []             # 每笔完整交易（买->卖）的净盈亏
         self.equity_curve = []       # 每日策略净值
+        self.bh_prices = []          # 每日 BTC 收盘价（算基准回撤用，与净值对齐）
         self.bh_start_price = None   # buy & hold 基准起点价
         self.last_price = None
 
@@ -87,8 +94,15 @@ class DualMACrossover(QCAlgorithm):
             self.log(f"平仓 @ {oe.fill_price:.2f}  本笔净盈亏: {pnl:+.2f}")
 
     def on_end_of_day(self, symbol):
-        if not self.is_warming_up:
+        if not self.is_warming_up and self.last_price is not None:
             self.equity_curve.append(self.portfolio.total_portfolio_value)
+            self.bh_prices.append(self.last_price)   # 同一天的策略净值与 BTC 价一起记
+
+    @staticmethod
+    def _max_drawdown(curve):
+        """从历史最高点跌下来的最大幅度（返回负数）。策略和基准共用。"""
+        peak = np.maximum.accumulate(curve)
+        return ((curve - peak) / peak).min()
 
     def on_end_of_algorithm(self):
         eq = np.array(self.equity_curve)
@@ -97,8 +111,7 @@ class DualMACrossover(QCAlgorithm):
         rets = np.diff(eq) / eq[:-1]
 
         total_ret = eq[-1] / eq[0] - 1
-        peak = np.maximum.accumulate(eq)
-        max_dd = ((eq - peak) / peak).min()
+        max_dd = self._max_drawdown(eq)
         sharpe = rets.mean() / rets.std() * np.sqrt(365) if rets.std() > 0 else 0
         # crypto 7x24，年化用 365 而不是股票的 252
 
@@ -108,7 +121,10 @@ class DualMACrossover(QCAlgorithm):
         pl_ratio = (np.mean(wins) / abs(np.mean(losses))
                     if wins and losses else float("nan"))
 
-        bh_ret = self.last_price / self.bh_start_price - 1
+        # buy & hold 基准：直接拿每日 BTC 价当净值曲线，同一套算法算收益和回撤
+        bh = np.array(self.bh_prices)
+        bh_ret = bh[-1] / bh[0] - 1
+        bh_dd = self._max_drawdown(bh)
 
         self.log("========== 第 2 周验收指标 ==========")
         self.log(f"完整交易笔数: {len(self.trades)}")
@@ -118,6 +134,9 @@ class DualMACrossover(QCAlgorithm):
         self.log(f"盈亏比:     {pl_ratio:.2f}")
         self.log(f"Sharpe(年化): {sharpe:.2f}")
         self.log("------- vs Buy & Hold BTC -------")
-        self.log(f"基准收益:   {bh_ret * 100:+.2f}%")
-        self.log(f"超额收益:   {(total_ret - bh_ret) * 100:+.2f}%  "
-                 f"({'赢' if total_ret > bh_ret else '输'}基准)")
+        self.log(f"基准收益:   {bh_ret * 100:+.2f}%   "
+                 f"(超额 {(total_ret - bh_ret) * 100:+.2f}%, "
+                 f"{'赢' if total_ret > bh_ret else '输'}基准)")
+        self.log(f"基准回撤:   {bh_dd * 100:.2f}%   "
+                 f"(策略回撤 {max_dd * 100:.2f}%, "
+                 f"{'更抗跌' if max_dd > bh_dd else '没更抗跌'})")
