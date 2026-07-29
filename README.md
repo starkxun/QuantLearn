@@ -15,6 +15,13 @@ QuantLearn/
 │   ├── week01-quantconnect-setup-and-cost-model.md   # 第 1 周完整笔记（主文档）
 │   ├── code.py                    # 第 1 周 Research notebook 代码（可直接粘贴运行）
 │   └── docs.md                    # 补充笔记：验收清单 + 滑点概念图解
+├── Week_2/
+│   ├── main.py                    # 双均线 20/60 回测算法
+│   └── docs.md                    # 笔记：金叉死叉 / 预热 / 回撤 / 绩效指标
+├── Week_3/
+│   ├── code.py                    # Research notebook：向量化回测 + 参数扫描 + 训练/测试拆分
+│   ├── main.py                    # 参数化的真引擎回测，用来交叉验证 code.py
+│   └── docs.md                    # 任务说明 + 结果记录模板
 └── README.md
 ```
 
@@ -23,7 +30,8 @@ QuantLearn/
 | 周次 | 主题 | 状态 |
 |---|---|---|
 | Week 1 | QC 环境搭建、数据探索、成本模型验证 | ✅ 完成 |
-| Week 2 | 双均线（MA crossover）策略：有买有卖、完整回测指标 | 🔜 规划中 |
+| Week 2 | 双均线（MA crossover）策略：有买有卖、完整回测指标 | ✅ 完成 |
+| Week 3 | 识别"看起来赚钱"的陷阱：参数扫描、训练/测试拆分、成本影响 | 🚧 进行中 |
 
 ---
 
