@@ -31,9 +31,13 @@ CG_EXCHANGE = "Binance"          # Coinglass 历史接口的 exchange 参数
 # 理论间隔 10s，垫到 11s 实测 100% 成功，留 1s 给网络抖动
 BUCKET_COINGLASS = "coinglass"
 BUCKET_LSR = "lsr"
+# 币安镜像限的是权重（1200/分钟，klines limit=1000 只算 2），全量拉 9 个币也就
+# 几十次请求，够用得很。垫 0.25s 纯粹是别把人家当沙包打。
+BUCKET_SPOT = "spot"
 MIN_INTERVAL = {
     BUCKET_COINGLASS: 11.0,
     BUCKET_LSR: 11.0,
+    BUCKET_SPOT: 0.25,
 }
 
 # 代理有丢包（同一请求时通时不通），重试是硬性要求不是优化项
