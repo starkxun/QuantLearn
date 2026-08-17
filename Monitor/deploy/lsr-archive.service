@@ -1,0 +1,45 @@
+# systemd 常驻服务：LSR 归档器
+#
+# 用常驻循环而不是 cron --once 每 5 分钟拉一次，原因：
+#   - archive_lsr.py 自带绝对时刻排程，不会因单次抓取耗时累积漂移
+#   - 少 288 次/天的解释器冷启动（每次要 import pandas）
+#   - Restart=always 让崩溃自愈，cron 做不到
+#
+# 安装（把 %ROOT% 换成服务器上的仓库路径，如 /opt/QuantLearn）：
+#   sed 's#%ROOT%#/opt/QuantLearn#g' lsr-archive.service \
+#     | sudo tee /etc/systemd/system/lsr-archive.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now lsr-archive
+#   systemctl status lsr-archive
+#   journalctl -u lsr-archive -f
+
+[Unit]
+Description=QuantLearn LSR smart-money signal archiver
+Documentation=file://%ROOT%/Monitor/docs.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%ROOT%/Monitor
+ExecStart=%ROOT%/.venv/bin/python archive_lsr.py
+
+# 崩了就重启。归档器的价值在于连续性，宁可重启也不能停。
+Restart=always
+RestartSec=30
+# 反复崩溃时别把日志刷爆：10 分钟内最多重启 10 次，超了就停下等人看
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+StandardOutput=append:%ROOT%/Monitor/data/archive.log
+StandardError=append:%ROOT%/Monitor/data/archive.log
+
+# 基本加固：这个进程只需要读代码、写 data/、发 HTTPS
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=%ROOT%/Monitor/data
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+# 凭证 —— 绝不入库
+.env
+
+# 虚拟环境
+.venv/
+venv/
+
+# 抓取的数据（体积大且可重建，LSR 归档除外但也不该进 git）
+Monitor/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
