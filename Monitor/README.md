@@ -33,6 +33,16 @@ python peek.py                     # 先看一眼有哪些数据
 | `python quality.py --verbose` | 质检 + 问题明细 | 秒 |
 | `python fetch_coinglass.py` | 更新 4 个 Coinglass 指标 | **~8 分钟** |
 | `python fetch_coinglass.py funding_rate` | 只更新一个指标 | ~2 分钟 |
+| `python indicators.py` | 算第 1~2 层指标 → `data/indicators.parquet` | 秒 |
+| `python indicators.py --show BTC` | 算完顺便看最近几天 | 秒 |
+| `python indicators.py --verify` | 指标验收（无未来函数 / ER 合理性 / 对齐 Week 3） | 秒 |
+| `python cross_section.py` | 算第 3 层横截面 → 两个 parquet | 秒 |
+| `python cross_section.py --show 15` | 算完看最近 15 天市场状态 | 秒 |
+| `python cross_section.py --verify` | 横截面验收 | 秒 |
+| `python panel.py` | 组装面板 → 快照 + markdown 报告 | 秒 |
+| `python panel.py --date 2026-08-10` | 补算历史某天 | 秒 |
+| `./run_daily.sh` | **完整日频流水线**（取数→指标→面板） | ~9 分钟 |
+| `./run_daily.sh --quick` | 同上但跳过 Coinglass | ~20 秒 |
 | `deploy/pull_data.sh <目标>` | 从服务器拉 LSR 归档 | ~10s |
 
 `fetch_coinglass.py` 慢是因为限频 6 次/分钟、必须串行垫 11 秒，不是卡住了。
@@ -134,6 +144,79 @@ python peek.py                     # 先看一眼有哪些数据
 
 > ⚠️ `null` 保留为 NaN，**不要 `fillna(0)`**。手册明确 null 不是 0。
 
+### 3.4 `data/indicators.parquet` — 第 1~2 层指标
+
+由 `indicators.py` 从现货日线算出。含全部 9 币（`coin` 列筛），**各币用各自的全历史**。
+参数全部写死（MA 20/60、ER 20、ATR 14、波动 30 日），本项目不做参数优化。
+
+| 列 | 含义 | 读法 |
+|---|---|---|
+| `dist_ma20` `dist_ma60` | `收盘/均线 − 1` | `+0.05` = 高于均线 5% |
+| `ma20_vs_ma60` | `MA20/MA60 − 1` | `>0` 等价于金叉状态（已验证与 Week 3 零分歧） |
+| `er20` | Kaufman 效率系数 | **0~1，越接近 1 越单边，越接近 0 越震荡** |
+| `donchian20` | 20 日区间位置 | `0`=区间底 `1`=区间顶 |
+| `pos_1y` | 365 日区间位置 | 同上 |
+| `mom_1m` `mom_3m` `mom_6m` | 30/90/180 日收益 | 小数 |
+| `atr_pct` | `ATR(14)/收盘` | **跨币可比的波动度量**，`0.02` = 日均真实波幅 2% |
+| `rv30` | 30 日已实现波动率（年化） | `0.22` = 22% |
+| `rv30_pct` | `rv30` 在**自身历史**中的分位 | expanding 计算，只跟过去比 |
+| `dd_ath` | 距历史最高点的回撤 | `-0.49` = 腰斩 |
+| `dd_1y` | 距 365 日最高点的回撤 | 同上 |
+
+> ⚠️ **一律存连续距离，不存布尔金叉。** 「刚穿过 0.1%」和「远在上方 30%」是完全不同的
+> 处境，布尔化会把这个信息丢光。要布尔自己 `> 0` 就行。
+
+> ⚠️ 年化用 `sqrt(365)` 不是 252 —— crypto 全年无休，「52 周高点」也是 365 天。
+
+> ✅ **无未来函数已验证**：把数据截断到某天重算，历史值与全样本完全一致。
+> 加新指标后请重跑 `indicators.py --verify`。
+
+### 3.5 `data/cross_section_market.parquet` — 市场级（每天一行）
+
+由 `cross_section.py` 算出，**区间固定 2023-05-03 起**（公共起始日）。
+
+| 列 | 含义 | 读法 |
+|---|---|---|
+| `avg_corr60` | 9 币 60 日平均两两相关 | **本项目最该告警的指标**，飙升=分散化失效 |
+| `dispersion` | 当日 9 币收益的横截面标准差 | 低=纯 beta 行情，选币无意义 |
+| `mkt_ret` | 等权 9 币当日收益 | 市场参照 |
+| `breadth_ma60` `breadth_ma200` | 站上均线的币数 | 0~9 |
+| `breadth_ma60_n` `breadth_ma200_n` | **当天均线已就绪的币数**（分母） | SUI 的 MA200 要到 2023-11 才有 |
+| `breadth_ma60_pct` | 上面两者之比 | 跨时期可比，直接看这个 |
+
+> ⚠️ 广度要看 `_pct` 或自己除以 `_n`。直接看 `breadth_ma200` 会在早期被系统性低估——
+> 那时 SUI 的 200 日均线还没就绪，分母不是 9。
+
+### 3.6 `data/cross_section_coin.parquet` — 个币级（币 × 日）
+
+| 列 | 含义 | 读法 |
+|---|---|---|
+| `rel_btc` | 该币价格 / BTC 价格 | BTC 自己恒为 1 |
+| `rel_btc_chg20` | 上面这个比值的 20 日变化 | **>0 = 近 20 日跑赢 BTC**，山寨 alpha 在这 |
+| `mom_3m` | 90 日收益 | 小数 |
+| `mom3m_rank` | 当日 9 币的动量排名 | **1 = 最强**，9 = 最弱 |
+| `mom3m_rank_chg20` | 排名 20 日变化 | **正数 = 名次前进**（数字变小） |
+
+> ⚠️ 一个已验证的基线：3.3 年下来 **9 个币里 8 个跑输 BTC**，只有 SOL 跑赢（+54.8%）。
+> 拿山寨的隐含假设是"我能选对"。
+
+### 3.7 `data/snapshots/YYYY-MM-DD.{parquet,md}` — 每日面板快照
+
+由 `panel.py` 生成，**一天一个，永不覆盖**（`--force` 才会盖）。
+
+- `.parquet` — 9 行（每币一行），含第 1~3 层全部指标 + Coinglass 四件套 +
+  市场级字段（随行复制，一个文件读全）
+- `.md` — 人看的报告，同样内容排成表格
+
+面板日期锚定**现货最后一根已收盘 K 线**，所以永远是「昨天」。
+Coinglass 当天虽有值，但那是没走完的一天，混进来快照就不可复现了。
+
+> ⚠️ **这份快照是三个月后才显出价值的东西。** 每一次静默覆盖都是在毁掉未来的样本，
+> 所以默认跳过已存在的日期。
+
+**面板只呈现数据，不做判断。** 没有"该买/该卖"，也没有"当前是趋势/震荡"——
+状态标签属于 Day 8，且只允许接入 Day 7 验证过的因子。
+
 ---
 
 ## 4. 常用查询（可直接复制）
@@ -203,10 +286,19 @@ deploy/deploy.sh -y ubuntu@43.155.206.51
 
 # 重启服务
 ssh ubuntu@43.155.206.51 'sudo systemctl restart lsr-archive'
+
+# 日频面板：排程 / 上次结果 / 日志
+ssh ubuntu@43.155.206.51 'systemctl list-timers panel-daily --no-pager'
+ssh ubuntu@43.155.206.51 'systemctl status panel-daily.service --no-pager'
+ssh ubuntu@43.155.206.51 'tail -20 ~/QuantLearn/Monitor/data/daily.log'
+
+# 手动触发一次日频（不等 timer）
+ssh ubuntu@43.155.206.51 'sudo systemctl start panel-daily.service'
 ```
 
-> ⚠️ **限频 6 次/分钟是按 API key 计的，只能在一个地方跑归档。**
-> 服务器已经在跑，本地不要再执行 `archive_lsr.py`，否则两边互相打 429。
+> ⚠️ **限频 6 次/分钟是按 API key 计的，只能在一个地方跑。**
+> 服务器已经在跑归档器和日频流水线，本地不要再执行 `archive_lsr.py` 或
+> `fetch_coinglass.py`，否则两边互相打 429。本地要新数据就用 `pull_data.sh` 拉。
 
 **每周花 10 分钟检查**：服务还活着吗？归档天数在涨吗？磁盘够吗？
 
@@ -222,17 +314,20 @@ ssh ubuntu@43.155.206.51 'sudo systemctl restart lsr-archive'
 | `fetch_coinglass.py` 跑 8 分钟 | 限频 6 次/分钟必须串行，正常 |
 | 429「上游 Key 额度不足」 | 中转站上游的额度，不是我们的 6/min，等一会再试 |
 | LSR 快照数少于 288 | 服务器那天没跑满，或还没到当天结束 |
-| 相关性算出来是 NaN | 早于 2023-05-03，SUI 还没上市 |
+| 相关性算出来是 NaN | 早于 2023-05-03，或窗口不满 60 天 |
+| 广度看着偏低 | 用了绝对计数，该看 `_pct` 或除以 `_n` |
 | 请求偶发失败 | 本地代理丢包，重试机制会兜住；服务器上不走代理 |
 
 ---
 
 ## 7. 现在能做什么 / 还不能做什么
 
-**能做**（Day 1~3 已完成）：读现货日线、funding、OI、大户多空比、主动买卖量的完整历史；
-看 LSR 实时快照。
+**能做**（Day 1~6 已完成）：读现货日线、funding、OI、大户多空比、主动买卖量的完整历史；
+看 LSR 实时快照；查单币的趋势/波动状态（`indicators.parquet`）；
+查市场级横截面状态（相关性/离散度/广度）与个币相对强弱；
+出每日面板快照（服务器每天 00:30 UTC 自动跑）。
 
-**还不能做**（Day 4~8）：趋势/波动指标、横截面指标、regime 判断。
+**还不能做**（Day 7~8）：因子验证、regime 判断。
 这些还没写，别指望 `peek.py` 给结论——**它只摊开原始数据，不做任何判断**。
 
 **永远不做**：买卖信号。见 docs.md 第 2 节红线清单。

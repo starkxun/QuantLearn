@@ -21,6 +21,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# 以部署用户身份跑，不要用 root。
+# root 跑出来的数据文件属主是 root，之后手动跑脚本会写不动（实测踩过）。
+User=%USER%
+Group=%USER%
 WorkingDirectory=%ROOT%/Monitor
 ExecStart=%ROOT%/.venv/bin/python archive_lsr.py
 

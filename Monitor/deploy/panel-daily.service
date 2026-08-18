@@ -1,0 +1,31 @@
+# 日频面板流水线（一次性任务，由 panel-daily.timer 触发）
+#
+# 和 lsr-archive 的区别：那个是常驻循环，这个是跑完就退出的 oneshot。
+# 所以**没有 Restart=** —— 失败就等下一次 timer，不要自动重试：
+# 重试会撞上 Coinglass 6 次/分钟的限频，越重试越堵。
+
+[Unit]
+Description=QuantLearn daily market panel
+Documentation=file://%ROOT%/Monitor/docs.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 以部署用户身份跑，不要用 root。
+# root 跑出来的数据文件属主是 root，之后手动跑脚本会写不动（实测踩过）。
+User=%USER%
+Group=%USER%
+WorkingDirectory=%ROOT%/Monitor
+ExecStart=%ROOT%/Monitor/run_daily.sh
+# 完整跑一次约 9 分钟，给到 30 分钟余量（重试和网络抖动会拉长）
+TimeoutStartSec=1800
+
+StandardOutput=append:%ROOT%/Monitor/data/daily.log
+StandardError=append:%ROOT%/Monitor/data/daily.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=%ROOT%/Monitor/data

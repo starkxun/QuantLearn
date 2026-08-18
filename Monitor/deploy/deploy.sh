@@ -10,7 +10,7 @@
 #   1. rsync 代码上去（不传 data/、.venv、本地 .env）
 #   2. 远程建 venv 装依赖
 #   3. 生成服务器专属 .env —— 只含 key，**不含代理**（海外 VPS 直连）
-#   4. 装 systemd 服务并启动
+#   4. 装 systemd 服务（常驻归档器 + 日频面板 timer）并启动
 #   5. 验证：等第一个快照落盘
 #
 # 注意：API key 限频 6 次/分钟是**按 key 计**的，服务器和本地同时跑会互相挤兑配额。
@@ -59,6 +59,7 @@ fi
 # ---------- 1. 传代码 ----------
 say "同步代码 → $TARGET:$REMOTE_DIR"
 REMOTE_DIR_EXPANDED=$($SSH "$TARGET" "eval echo $REMOTE_DIR")
+REMOTE_USER=$($SSH "$TARGET" 'id -un')
 $SSH "$TARGET" "mkdir -p '$REMOTE_DIR_EXPANDED'"
 rsync -az --info=stats1 \
     --exclude 'data/' --exclude '.venv/' --exclude '.env' \
@@ -95,12 +96,22 @@ $SSH "$TARGET" "cd '$REMOTE_DIR_EXPANDED/Monitor' && ../.venv/bin/python archive
 say "安装 systemd 服务"
 $SSH "$TARGET" "
     SUDO=''; [ \"\$(id -u)\" -ne 0 ] && SUDO=sudo
-    sed 's#%ROOT%#$REMOTE_DIR_EXPANDED#g' '$REMOTE_DIR_EXPANDED/Monitor/deploy/lsr-archive.service' \
-      | \$SUDO tee /etc/systemd/system/lsr-archive.service > /dev/null
+    # lsr-archive 常驻 + panel-daily 定时。%ROOT% 和 %USER% 都要替换。
+    for u in lsr-archive.service panel-daily.service panel-daily.timer; do
+      sed -e 's#%ROOT%#$REMOTE_DIR_EXPANDED#g' -e 's#%USER%#$REMOTE_USER#g' \
+          \"$REMOTE_DIR_EXPANDED/Monitor/deploy/\$u\" \
+        | \$SUDO tee /etc/systemd/system/\$u > /dev/null
+    done
+    # 早期版本以 root 跑过，留下 root 属主的数据文件，会挡住手动操作。统一收回。
+    \$SUDO chown -R $REMOTE_USER:$REMOTE_USER '$REMOTE_DIR_EXPANDED/Monitor/data'
     \$SUDO systemctl daemon-reload
     \$SUDO systemctl enable --now lsr-archive
+    # enable --now 不会重启已在运行的服务，改了 unit 必须显式 restart 才生效
+    \$SUDO systemctl restart lsr-archive
+    \$SUDO systemctl enable --now panel-daily.timer
     sleep 3
-    \$SUDO systemctl is-active lsr-archive && echo '  服务已启动'
+    \$SUDO systemctl is-active lsr-archive && echo '  归档服务已启动'
+    \$SUDO systemctl is-active panel-daily.timer && echo '  日频 timer 已启用'
 "
 
 say "完成。验证命令："
@@ -108,6 +119,8 @@ cat <<EOF
   ssh $TARGET 'systemctl status lsr-archive --no-pager'
   ssh $TARGET 'journalctl -u lsr-archive -n 20 --no-pager'
   ssh $TARGET 'tail -5 $REMOTE_DIR_EXPANDED/Monitor/data/archive.log'
+  ssh $TARGET 'systemctl list-timers panel-daily --no-pager'
+  ssh $TARGET 'tail -20 $REMOTE_DIR_EXPANDED/Monitor/data/daily.log'
 
 拉数据回本地：
   ./pull_data.sh $TARGET:$REMOTE_DIR_EXPANDED

@@ -1,0 +1,24 @@
+# 每天 UTC 00:30 触发日频面板。
+#
+# 为什么是 00:30 UTC：
+#   币安日线在 00:00 UTC 收盘，面板锚定的是**最后一根已收盘 K 线**。
+#   留 30 分钟给交易所出数据和镜像同步，早了会拉到不完整的一根。
+#
+# 为什么显式写 UTC：
+#   服务器时区是 CST，不写 UTC 的话 OnCalendar 按本地时间算，会差 8 小时。
+#
+# Persistent=true：机器关机错过了触发点，开机后补跑一次。
+# 这对归档类任务很重要——少一天就永远少一天。
+
+[Unit]
+Description=Run QuantLearn daily panel at 00:30 UTC
+
+[Timer]
+OnCalendar=*-*-* 00:30:00 UTC
+Persistent=true
+# 随机延迟 0~5 分钟，避免整点和别的任务一起抢带宽
+RandomizedDelaySec=300
+Unit=panel-daily.service
+
+[Install]
+WantedBy=timers.target
